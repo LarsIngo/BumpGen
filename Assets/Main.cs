@@ -8,6 +8,7 @@ public class Main : MonoBehaviour
     public GameObject distanceDisplay;
     public GameObject heightDisplay;
     public GameObject normalDisplay;
+    public GameObject finalDisplay;
 
     private void Awake ()
     {
@@ -20,20 +21,26 @@ public class Main : MonoBehaviour
         float[] bevel = GenerateBevel(width, height, ref mask);
         Display(bevelDisplay, width, height, FloatToColor(bevel));
 
-        int N = 50;
+        int N = 10;
         float[] distance = bevel;
         for (int i = 0; i < N; ++i)
         {
-            distance = GenerateDistance(width, height, ref distance, N);
+            distance = GenerateDistance(width, height, ref distance);
         }
-        Display(distanceDisplay, width, height, FloatToColor(distance));
+        Display(distanceDisplay, width, height, FloatToColor(Normalize(ref distance)));
 
         float[] heightMap = GenerateHeight(width, height, ref mask, ref distance);
         heightMap = Normalize(ref heightMap);
         Display(heightDisplay, width, height, FloatToColor(heightMap));
 
-        Vector3[] normalPixels = GenerateNormal(width, height, ref heightMap);
-        Display(normalDisplay, width, height, VectorToColor(normalPixels));
+        Vector3[] normalMap = GenerateNormal(width, height, ref heightMap);
+        Color[] normalPixels = VectorToColor(normalMap);
+        Display(normalDisplay, width, height, normalPixels);
+
+        // Final.
+        Material mat = finalDisplay.GetComponent<MeshRenderer>().material;
+        Texture2D normalTexture = ColorToTexture(width, height, ref normalPixels);
+        mat.SetTexture("_BumpMap", normalTexture);
     }
 
     private float[] GenerateBevel(int width, int height, ref float[] input)
@@ -62,14 +69,14 @@ public class Main : MonoBehaviour
                 // True edge if pixel inside kernel differs.
                 float final = edge ? 1.0f : 0.0f;
 
-                output[mainIndex] = 1.0f - (final * mainMask);
+                output[mainIndex] = (1.0f - (final * mainMask)) * float.MaxValue;
             }
         }
 
         return output;
     }
 
-    private float[] GenerateDistance(int width, int height, ref float[] input, int N)
+    private float[] GenerateDistance(int width, int height, ref float[] input)
     {
         float[] output = new float[width * height];
         for (int y = 0; y < height; ++y)
@@ -79,20 +86,15 @@ public class Main : MonoBehaviour
                 int mainIndex = GetIndex(x, y, width, height);
                 float mainBevel = input[mainIndex];
 
-                //if (mainBevel < 0.5f)
-                //{
-                //    bool debug = true;
-                //}
-
-                float min = Mathf.Sqrt(2);
+                float min = float.MaxValue;
                 for (int ky = -1; ky <= 1; ++ky)
                 {
                     for (int kx = -1; kx <= 1; ++kx)
                     {
                         int index = GetIndex(x + kx, y + ky, width, height);
                         float pixel = input[index];
-                        float weight = GetWeight(kx, ky) / Mathf.Sqrt(2) / N;
-                        float value = pixel + weight / Mathf.Sqrt(2);
+                        float weight = GetWeight(kx, ky);
+                        float value = pixel < float.MaxValue ? pixel + weight : float.MaxValue;
 
                         // Store minimum.
                         min = System.Math.Min(min, value);
@@ -101,6 +103,25 @@ public class Main : MonoBehaviour
 
                 output[mainIndex] = min;
             }
+        }
+
+        return output;
+    }
+
+    private float[] Normalize(ref float[] input)
+    {
+        float max = 0.0f;
+        for (int i = 0; i < input.Length; ++i)
+        {
+            float value = input[i];
+            max = value < float.MaxValue ? System.Math.Max(value, max) : max;
+        }
+
+        float[] output = new float[input.Length];
+        for (int i = 0; i < input.Length; ++i)
+        {
+            float value = input[i];
+            output[i] = value < float.MaxValue ? value / max : 1.0f;
         }
 
         return output;
@@ -119,23 +140,6 @@ public class Main : MonoBehaviour
 
                 output[mainIndex] = maskMain * distMain;
             }
-        }
-
-        return output;
-    }
-
-    private float[] Normalize(ref float[] input)
-    {
-        float max = 0.0f;
-        for (int i = 0; i < input.Length; ++i)
-        {
-            max = System.Math.Max(input[i], max);
-        }
-
-        float[] output = new float[input.Length];
-        for (int i = 0; i < input.Length; ++i)
-        {
-            output[i] = input[i] / max;
         }
 
         return output;
@@ -217,6 +221,16 @@ public class Main : MonoBehaviour
 
         return output;
     }
+
+    private Texture2D ColorToTexture(int width, int height, ref Color[] input)
+    {
+        Texture2D texture = new Texture2D(width, height, TextureFormat.ARGB32, false);
+        texture.SetPixels(input);
+        texture.Apply();
+
+        return texture;
+    }
+
 
     private Color[] VectorToColor(Vector3[] input)
     {
